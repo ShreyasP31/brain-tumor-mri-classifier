@@ -6,9 +6,7 @@ from torchvision import transforms, models
 from PIL import Image
 import torch.nn.functional as F
 import segmentation_models_pytorch as smp
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.image import show_cam_on_image
-from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+import matplotlib.cm as cm
 
 # ── Page config ───────────────────────────────────────────────────────
 st.set_page_config(
@@ -86,28 +84,56 @@ seg_transform = transforms.Compose([
                          [0.229, 0.224, 0.225])
 ])
 
-# ── Grad-CAM ──────────────────────────────────────────────────────────
+# ── Grad-CAM (manual, no opencv) ──────────────────────────────────────
 def generate_gradcam(model, input_tensor, predicted_class_idx, original_image):
-    target_layers    = [model.features[-1]]
-    cam              = GradCAM(model=model, target_layers=target_layers)
-    targets          = [ClassifierOutputTarget(predicted_class_idx)]
-    grayscale_cam    = cam(input_tensor=input_tensor, targets=targets)[0]
-    original_resized = np.array(
-        original_image.resize((300, 300)), dtype=np.float32
-    ) / 255.0
-    return show_cam_on_image(original_resized, grayscale_cam, use_rgb=True)
+    model.eval()
+    features  = None
+    gradients = None
 
-# ── Segmentation with Grad-CAM fallback ──────────────────────────────
+    def forward_hook(module, input, output):
+        nonlocal features
+        features = output.detach()
+
+    def backward_hook(module, grad_input, grad_output):
+        nonlocal gradients
+        gradients = grad_output[0].detach()
+
+    handle_f = model.features[-1].register_forward_hook(forward_hook)
+    handle_b = model.features[-1].register_full_backward_hook(backward_hook)
+
+    output = model(input_tensor)
+    model.zero_grad()
+    output[0, predicted_class_idx].backward()
+
+    handle_f.remove()
+    handle_b.remove()
+
+    weights     = gradients.mean(dim=(2, 3), keepdim=True)
+    cam         = (weights * features).sum(dim=1).squeeze()
+    cam         = F.relu(cam)
+    cam         = cam - cam.min()
+    cam         = cam / (cam.max() + 1e-8)
+    cam_np      = cam.cpu().numpy()
+
+    cam_pil     = Image.fromarray((cam_np * 255).astype(np.uint8)).resize((300, 300))
+    cam_colored = cm.jet(np.array(cam_pil) / 255.0)[:, :, :3]
+
+    original_resized = np.array(original_image.resize((300, 300)), dtype=np.float32) / 255.0
+    overlay          = (0.5 * original_resized + 0.5 * cam_colored)
+    overlay          = np.clip(overlay * 255, 0, 255).astype(np.uint8)
+    return overlay
+
+# ── Segmentation ──────────────────────────────────────────────────────
 def generate_segmentation(model, image, gradcam_heatmap=None):
     input_tensor = seg_transform(image).unsqueeze(0)
     with torch.no_grad():
         output = model(input_tensor)
         mask   = torch.sigmoid(output).squeeze().numpy()
 
-    mask_binary = (mask > 0.3).astype(np.uint8)
+    mask_binary      = (mask > 0.3).astype(np.uint8)
     original_resized = np.array(image.resize((256, 256)), dtype=np.uint8)
 
-    if mask_binary.any() and mask_binary.sum() > 100:  # meaningful mask
+    if mask_binary.any() and mask_binary.sum() > 100:
         overlay  = original_resized.copy()
         red_mask = mask_binary > 0
         overlay[red_mask, 0] = 255
@@ -116,16 +142,13 @@ def generate_segmentation(model, image, gradcam_heatmap=None):
         blended = (0.45 * original_resized + 0.55 * overlay).astype(np.uint8)
         source  = "U-Net segmentation"
     elif gradcam_heatmap is not None:
-        # Fallback — use Grad-CAM heatmap as segmentation guide
-        from PIL import Image as PILImage
-        cam_resized  = np.array(
-            PILImage.fromarray(gradcam_heatmap).resize((256, 256))
+        cam_resized = np.array(
+            Image.fromarray(gradcam_heatmap).resize((256, 256))
         )
-        # Extract red channel from Grad-CAM as mask
-        cam_gray     = cam_resized[:, :, 0].astype(np.float32)
-        cam_norm     = (cam_gray - cam_gray.min()) / (cam_gray.max() - cam_gray.min() + 1e-8)
-        cam_mask     = (cam_norm > 0.5).astype(np.uint8)
-        overlay      = original_resized.copy()
+        cam_gray  = cam_resized[:, :, 0].astype(np.float32)
+        cam_norm  = (cam_gray - cam_gray.min()) / (cam_gray.max() - cam_gray.min() + 1e-8)
+        cam_mask  = (cam_norm > 0.5).astype(np.uint8)
+        overlay   = original_resized.copy()
         overlay[cam_mask > 0, 0] = 255
         overlay[cam_mask > 0, 1] = 0
         overlay[cam_mask > 0, 2] = 0
@@ -136,6 +159,7 @@ def generate_segmentation(model, image, gradcam_heatmap=None):
         source  = "No region detected"
 
     return blended, mask_binary, source
+
 # ── UI ────────────────────────────────────────────────────────────────
 st.title("🧠 Brain Tumor MRI Classifier")
 st.markdown(
@@ -157,7 +181,6 @@ if uploaded_file is not None:
 
     with st.spinner("Analyzing MRI..."):
 
-        # ── Classification ─────────────────────────────────────────
         clf_tensor = clf_transform(image).unsqueeze(0)
         with torch.no_grad():
             output     = classifier(clf_tensor)
@@ -168,18 +191,14 @@ if uploaded_file is not None:
         predicted_class_idx = predicted_idx.item()
         confidence_pct      = confidence.item() * 100
 
-        # ── Grad-CAM ───────────────────────────────────────────────
         gradcam_image = generate_gradcam(
             classifier, clf_tensor, predicted_class_idx, image
         )
 
-        # ── Segmentation ───────────────────────────────────────────
-        # ── Segmentation ───────────────────────────────────────────
         seg_overlay, seg_mask, seg_source = generate_segmentation(
             segmentor, image, gradcam_image
         )
 
-    # ── Result ────────────────────────────────────────────────────
     if predicted_class == 'notumor':
         st.success(f"✅ Result: No Tumor Detected ({confidence_pct:.1f}% confidence)")
     else:
@@ -187,7 +206,6 @@ if uploaded_file is not None:
 
     st.info(descriptions[predicted_class])
 
-    # ── Confidence scores ──────────────────────────────────────────
     st.markdown("#### Confidence Scores")
     for i, cls in enumerate(class_names):
         st.progress(
@@ -195,7 +213,6 @@ if uploaded_file is not None:
             text=f"{cls.capitalize()}: {probs[i].item()*100:.1f}%"
         )
 
-    # ── Three panel visualization ──────────────────────────────────
     st.markdown("---")
     st.markdown("#### 🔬 Visual Analysis")
 
