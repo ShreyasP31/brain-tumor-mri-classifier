@@ -147,7 +147,7 @@ def generate_segmentation(model, image, gradcam_heatmap=None):
         )
         cam_gray  = cam_resized[:, :, 0].astype(np.float32)
         cam_norm  = (cam_gray - cam_gray.min()) / (cam_gray.max() - cam_gray.min() + 1e-8)
-        cam_mask  = (cam_norm > 0.5).astype(np.uint8)
+        cam_mask  = (cam_norm > 0.7).astype(np.uint8)
         overlay   = original_resized.copy()
         overlay[cam_mask > 0, 0] = 255
         overlay[cam_mask > 0, 1] = 0
