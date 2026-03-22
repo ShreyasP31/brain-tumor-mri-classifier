@@ -5,8 +5,8 @@ pillow
 scikit-learn
 matplotlib
 seaborn
-opencv-python-headless
-grad-cam
+opencv-python-headless==4.13.0.92
+grad-cam==1.5.5
 segmentation-models-pytorch
 timm
 ttach
