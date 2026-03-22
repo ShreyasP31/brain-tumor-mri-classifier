@@ -6,4 +6,5 @@ scikit-learn
 matplotlib
 seaborn
 grad-cam
+opencv-python-headless
 segmentation-models-pytorch
