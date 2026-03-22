@@ -1,0 +1,9 @@
+torch
+torchvision
+streamlit
+pillow
+scikit-learn
+matplotlib
+seaborn
+grad-cam
+segmentation-models-pytorch

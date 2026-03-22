@@ -1,0 +1,6 @@
+segmentation_data/
+Training/
+Testing/
+*.pth
+__pycache__/
+.ipynb_checkpoints/segmentation_data.zip
