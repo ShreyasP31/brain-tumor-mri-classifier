@@ -133,4 +133,19 @@ streamlit run app.py
 
 ---
 
+## Changelog
+
+**v2 — March 2026**
+- Upgraded model from EfficientNetB0 to EfficientNetB3
+- Added Grad-CAM explainability (manual implementation, no opencv dependency)
+- Trained U-Net segmentation model — 0.90 Dice score on LGG dataset
+- GPU training with mixed precision (AMP) on RTX 5060
+- Improved accuracy from 94.31% to 95.62%
+
+**v1 — March 2026**
+- Initial release — EfficientNetB0, 94.31% accuracy
+- Basic Streamlit web app
+
+---
+
 *Shreyas P | Biomedical Engineering | MIT Manipal | 2026*
