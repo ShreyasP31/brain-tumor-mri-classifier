@@ -133,7 +133,7 @@ def generate_segmentation(model, image, gradcam_heatmap=None):
     mask_binary      = (mask > 0.3).astype(np.uint8)
     original_resized = np.array(image.resize((256, 256)), dtype=np.uint8)
 
-    if mask_binary.any() and mask_binary.sum() > 100:
+    if mask_binary.any() and mask_binary.sum() > 500:
         overlay  = original_resized.copy()
         red_mask = mask_binary > 0
         overlay[red_mask, 0] = 255
